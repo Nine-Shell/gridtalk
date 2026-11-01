@@ -1,0 +1,5 @@
+{
+  "name": "gridtalk",
+  "owner": { "name": "Nine-Shell" },
+  "plugins": [{ "name": "gridtalk", "source": "./" }]
+}

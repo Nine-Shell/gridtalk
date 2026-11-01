@@ -26,7 +26,7 @@ claude plugin install gridtalk --marketplace Nine-Shell/gridtalk
 
 In the desktop app: click **+** next to the prompt box → **Plugins** → **Add marketplace** with `Nine-Shell/gridtalk` → **Add plugin**.
 
-This repository is private for now: installing needs read access on GitHub and a git credential for github.com on your machine.
+Gridtalk draws its panel in the **Claude Code Desktop** app. In a terminal it falls back to plain lines and text.
 
 ## Use
 

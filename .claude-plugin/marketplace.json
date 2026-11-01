@@ -1,5 +1,6 @@
 {
   "name": "gridtalk",
+  "description": "Gridtalk: a grid board beside the chat for talking with Claude in boxes, groups and lines.",
   "owner": { "name": "Nine-Shell" },
   "plugins": [{ "name": "gridtalk", "source": "./" }]
 }

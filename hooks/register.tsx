@@ -155,15 +155,18 @@ export const register: Register = on => {
     return { text: 'Gridtalk opened.' }
   })
 
-  on('tool.call', { tool: `mcp__gridtalk__${TOOL_READ}` }, async $ => {
+  // 道具の中で何か失敗しても、Claude にはエラーとして返し、会話を止めない
+  const failed = (err: unknown) => ({ isError: true as const, result: `Gridtalk error: ${err instanceof Error ? err.message : String(err)}` })
+
+  on('tool.call', { tool: `mcp__gridtalk__${TOOL_READ}` }, $ => (async () => {
     const note = (await read($, inherited)) ? '(This diagram was carried over from an earlier conversation in this project.)' : ''
     return { result: describe(await read($, board), note) }
-  })
-  on('tool.call', { tool: `mcp__gridtalk__${TOOL_SHOW}` }, async $ => {
+  })().catch(failed))
+  on('tool.call', { tool: `mcp__gridtalk__${TOOL_SHOW}` }, $ => (async () => {
     const { isPlaced } = await $.ui.open({ id: PANE, title: TITLE })
     return { result: isPlaced ? 'Gridtalk opened.' : 'Tried to open Gridtalk, but this screen cannot show it.' }
-  })
-  on('tool.call', { tool: `mcp__gridtalk__${TOOL_WRITE}` }, async ($, e) => {
+  })().catch(failed))
+  on('tool.call', { tool: `mcp__gridtalk__${TOOL_WRITE}` }, ($, e) => (async () => {
     const input = e as unknown as { nodes?: unknown; edges?: unknown }
     const out = await mutate($, () => sanitize(input), null)
     await update($, inherited, () => false)
@@ -173,7 +176,7 @@ export const register: Register = on => {
     const dropped = given(input.nodes) - out.nodes.length + given(input.edges) - out.edges.length
     const warn = dropped > 0 ? `\nNote: ${dropped} shapes/lines were dropped (limit ${MAX_NODES} shapes and ${MAX_EDGES} lines, or a line had no valid end, or was a duplicate).` : ''
     return { result: `Redrew the board and showed it to the user.${warn}\n${describe(out)}` }
-  })
+  })().catch(failed))
 
   // パネルの中の図から届く操作
   on('ui.message', async ($, e) => {

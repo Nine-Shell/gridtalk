@@ -84,12 +84,12 @@ const BOARD_SCHEMA = {
         type: 'object',
         properties: {
           id: { type: 'integer' },
-          kind: { enum: ['box', 'area', 'text'], description: '箱・囲み・文字' },
+          kind: { enum: ['box', 'area', 'text'], description: 'box, area (a group frame) or text' },
           label: { type: 'string', maxLength: 40 },
-          col: { type: 'integer', description: '左上の列（0から）' },
-          row: { type: 'integer', description: '左上の行（0から）' },
-          w: { type: 'integer', description: '横に何マス（箱・文字は2、囲みは中身を包む大きさが目安）' },
-          h: { type: 'integer', description: '縦に何マス（ふつうは1）' },
+          col: { type: 'integer', description: 'top-left column, from 0' },
+          row: { type: 'integer', description: 'top-left row, from 0' },
+          w: { type: 'integer', description: 'width in cells (box and text: 2; area: enough to enclose its contents)' },
+          h: { type: 'integer', description: 'height in cells (usually 1)' },
           color: { enum: ['gray', 'red', 'green', 'blue', 'purple'] },
         },
         required: ['id', 'kind', 'label', 'col', 'row'],
@@ -104,8 +104,8 @@ const BOARD_SCHEMA = {
           from: { type: 'integer' },
           to: { type: 'integer' },
           label: { type: 'string', maxLength: 40 },
-          arrow: { enum: ['one', 'both', 'none'], description: 'one=片方向（既定）、both=双方向、none=矢印なし' },
-          block: { type: 'boolean', description: '遮断×' },
+          arrow: { enum: ['one', 'both', 'none'], description: 'one = one way (default), both = both ways, none = no arrow' },
+          block: { type: 'boolean', description: 'a large ✕ on the line: blocked or forbidden' },
           color: { enum: ['gray', 'red', 'green', 'blue', 'purple'] },
         },
         required: ['from', 'to'],
@@ -156,7 +156,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_READ}` }, async $ => {
-    const note = (await read($, inherited)) ? '（この図は、このプロジェクトの前の会話から引き継いだものです）' : ''
+    const note = (await read($, inherited)) ? '(This diagram was carried over from an earlier conversation in this project.)' : ''
     return { result: describe(await read($, board), note) }
   })
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_SHOW}` }, async $ => {

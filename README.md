@@ -58,7 +58,6 @@ This repository is private for now: installing needs read access on GitHub and a
 - `hooks/board-surface.tsx` — draws the grid and handles dragging inside the panel
 - `hooks/register.tsx` — panel, buttons, the `/gridtalk` command, Claude's tools
 - `types/index.d.ts` — the stored data types
-- `DESIGN.md` — design notes (Japanese)
 
 Run the tests with `claude plugin test <folder>` and check the plugin with `claude plugin validate <folder>`.
 

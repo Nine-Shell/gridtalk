@@ -1,9 +1,9 @@
-// Gridtalk（図板）: パネル・ボタン・/gridtalk コマンド・Claude用の道具（read / write / show）
+// Gridtalk（図板）: パネル・ボタン・/gridtalk コマンド・Claude用の道具（read / write / show / export）
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as $T, Register } from 'claude-code'
 
 import type { Board, Selection, ZNode } from '../types'
-import { DEFAULT_ZOOM, DIMS, EMPTY, MAX_EDGES, MAX_NODES, SHADES, ZOOMS, describe, firstFree, isFree, membersOf, nextId, sanitize, scene, sizeOf } from './model'
+import { DEFAULT_ZOOM, DIMS, EMPTY, MAX_EDGES, MAX_NODES, SHADES, ZOOMS, describe, firstFree, isFree, membersOf, nextId, sanitize, scene, sizeOf, toSvg } from './model'
 
 const PANE = 'gridtalk'
 const TITLE = 'Gridtalk'
@@ -24,6 +24,7 @@ const HELP = [
   'Drag a GROUP by its border to move it with everything inside.',
   'Drag empty space, or use ◀ ▶, to scroll sideways.',
   'Ask Claude to "look at the board" to share your diagram.',
+  'EXPORT saves the diagram as an SVG image in gridtalk-exports/.',
 ]
 const selected = atom({ plugin: 'gridtalk', key: 'selected' } as const, null as Selection)
 const inherited = atom({ plugin: 'gridtalk', key: 'inherited' } as const, false)
@@ -73,6 +74,19 @@ function migrate(saved: unknown): Board {
 const TOOL_READ = 'read_board'
 const TOOL_WRITE = 'write_board'
 const TOOL_SHOW = 'show_board'
+const TOOL_EXPORT = 'export_board'
+
+// 図を SVG の画像にして、プロジェクトの gridtalk-exports/ に保存する（前の書き出しは消さない）
+// 返すのは保存したファイルの絶対パス。図が空なら null
+async function exportSvg($: $T): Promise<string | null> {
+  const b = await read($, board)
+  if (!b.nodes.length) return null
+  const d = new Date(), p = (v: number) => String(v).padStart(2, '0')
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  const path = `${(await $.session.root()).replace(/\/+$/, '')}/gridtalk-exports/board-${stamp}.svg`
+  await $.fs.write(path, toSvg(b))
+  return path
+}
 
 const BOARD_SCHEMA = {
   type: 'object',
@@ -130,6 +144,11 @@ export const register: Register = on => {
       isDeferred: false,
     })
     await $.tool.register({ name: TOOL_SHOW, description: 'Open the Gridtalk panel (does not change the diagram).', isDeferred: false })
+    await $.tool.register({
+      name: TOOL_EXPORT,
+      description: 'Save the Gridtalk board as an SVG image (same layout as the panel) in gridtalk-exports/ of the project, and return the file path. Use it when the user wants a picture of the diagram, for example to see it on a phone where the panel does not show; then send that file to the user. To understand the diagram yourself, use read_board instead (shorter and exact).',
+      isDeferred: false,
+    })
     // このプロジェクトで前に描いた図を引き継ぐ。壊れた保存は読まない（上書きもしない）
     // （以前の、プロジェクト共通の保存 'board' は、別の作業の図が混ざるので読まない）
     const cur = await read($, board)
@@ -165,6 +184,11 @@ export const register: Register = on => {
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_SHOW}` }, $ => (async () => {
     const { isPlaced } = await $.ui.open({ id: PANE, title: TITLE })
     return { result: isPlaced ? 'Gridtalk opened.' : 'Tried to open Gridtalk, but this screen cannot show it.' }
+  })().catch(failed))
+  on('tool.call', { tool: `mcp__gridtalk__${TOOL_EXPORT}` }, $ => (async () => {
+    const path = await exportSvg($)
+    if (!path) return { isError: true as const, result: 'The Gridtalk board is empty, so there is nothing to export.' }
+    return { result: `Saved the board as an SVG image: ${path}\nTo show it to the user (for example on their phone), send this file.` }
   })().catch(failed))
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_WRITE}` }, ($, e) => (async () => {
     const input = e as unknown as { nodes?: unknown; edges?: unknown }
@@ -312,6 +336,10 @@ export const register: Register = on => {
             {/* 横に動かすボタンは、いつも出しておく（出たり消えたりで並びが変わらないように） */}
             <Button key="pan-left" label="◀" dimColor={curOx === 0} onPress={panBy(-1)} />
             <Button key="pan-right" label="▶" dimColor={curOx >= maxOx} onPress={panBy(1)} />
+            <Button key="export" label="EXPORT" dimColor={!b.nodes.length} onPress={async () => {
+              const path = await exportSvg($).catch(() => undefined)
+              $.ui.toast(path ? `Saved ${path.split('/').slice(-2).join('/')}` : path === null ? 'Nothing to export yet' : 'Could not save the image')
+            }} />
             <Button key="help" label="HELP" variant={showHelp ? 'primary' : undefined} onPress={() => update($, help, v => !v)} />
           </Box>
         </Box>

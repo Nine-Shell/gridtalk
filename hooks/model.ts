@@ -169,7 +169,8 @@ export function describe(b: Board, note = ''): string {
 
 // ---- 画面に描くための形（Scene）と、線の道選び ----
 export type SceneBox = { id: number; kind: Kind; l: number; t: number; w: number; h: number; col: number; row: number; cw: number; ch: number; label: string; color: string; sel: boolean }
-export type SceneRun = { l: number; t: number; text: string; color: string }
+// label: 線のラベル（それ以外は矢印などの記号）
+export type SceneRun = { l: number; t: number; text: string; color: string; label?: boolean }
 // 細い棒で描く実線の一部。置き場所は整数のマス、棒はその中で a（始まりの空き）〜 b（終わりの空き）を除いた部分
 export type SceneSeg = { l: number; t: number; len: number; a: number; b: number; dir: 'h' | 'v'; color: string }
 export type Scene = {
@@ -337,10 +338,10 @@ function labelOf(label: string, pc: [number, number][], blocked: Uint8Array, W: 
     const text = fit(label, len - 2), w = cellWidth(text)
     const xs = pc.slice(i, i + len).map(p => p[0]), mid = Math.round((Math.min(...xs) + Math.max(...xs)) / 2)
     const free = (yy: number) => yy >= 0 && xs.every(x => !blocked[yy * W + x])
-    return { l: Math.max(0, mid - Math.floor(w / 2)), t: free(y - 1) ? y - 1 : y + 1, text, color }
+    return { l: Math.max(0, mid - Math.floor(w / 2)), t: free(y - 1) ? y - 1 : y + 1, text, color, label: true }
   }
   const [mx, my] = pc[Math.floor(pc.length / 2)]
-  return { l: mx + 2, t: my, text: fit(label, 10), color }
+  return { l: mx + 2, t: my, text: fit(label, 10), color, label: true }
 }
 
 // 図形の4辺の真ん中から出て、相手の4辺の真ん中に着く道のうち、短くて曲がりの少ないもの
@@ -432,4 +433,94 @@ function search(A: Rect, B: Rect, W: number, H: number, blocked: Uint8Array, ext
   while (s >= 0) { const k = s >> 2; out.push([k % W, (k / W) | 0]); first = s; s = ws.prev[s] }
   out.reverse()
   return { cells: out, startDir: first & 3, endDir: goal.get(bestS >> 2)! }
+}
+
+// ---- SVG の画像に書き出す（パネルが出ない画面、たとえば iPhone で図を見るため） ----
+// パネルと同じ scene（配置・線の通り道・色）を、文字マスの代わりにピクセルで描く
+// 1文字マスのピクセル（パネルの文字マスとほぼ同じ比率）。方眼は ZOOMS[1] で 126×120 のほぼ正方形
+const PX = 9, PY = 20
+// 画像のまわりの余白（上の辺にのせた囲みの名前が切れないように）
+const PAD = 16
+const FONT = `-apple-system, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif`
+const XML: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }
+// XML に入れられない文字（片割れのサロゲート・U+FFFE/FFFF）は捨てる（画像が開けなくならないように）
+const esc = (s: string) => s.replace(/[\p{Cs}\uFFFE\uFFFF]/gu, '').replace(/[&<>"']/g, c => XML[c] ?? c)
+// 文字の幅の見積もり（全角は字の大きさぶん、半角はその6割）
+const textPx = (s: string, size: number) => [...s].reduce((w, ch) => w + (cellWidth(ch) === 2 ? size : size * 0.6), 0)
+function fitPx(s: string, max: number, size: number): string {
+  if (textPx(s, size) <= max) return s
+  let out = ''
+  for (const ch of s) { if (textPx(out + ch + '…', size) > max) break; out += ch }
+  return out + '…'
+}
+
+export function toSvg(input: Board, u: Unit = ZOOMS[1]!): string {
+  // 外から来た図でも、ラベルの中身と数をここで必ず整える
+  const b = sanitize(input)
+  const sc = scene(b, null, '', true, u)
+  // 画像は描いてあるところまで（パネルでドラッグ用に空けてある右と下のマスは入れない）
+  let cx = 0, cy = 0
+  for (const m of [...sc.areas, ...sc.nodes]) { cx = Math.max(cx, m.l + m.w); cy = Math.max(cy, m.t + m.h) }
+  for (const g of sc.segs) { cx = Math.max(cx, g.l + (g.dir === 'h' ? g.len : 1)); cy = Math.max(cy, g.t + (g.dir === 'v' ? g.len : 1)) }
+  for (const r of sc.runs) { cx = Math.max(cx, r.l + cellWidth(r.text)); cy = Math.max(cy, r.t + 1) }
+  // 罫線のマスの区切りでそろえる
+  const cols = Math.min(sc.cols, Math.ceil(cx / u.uw)), rows = Math.min(sc.rows, Math.ceil(cy / u.uh))
+  const gw = cols * u.uw * PX, gh = rows * u.uh * PY
+  const W = gw + PAD * 2, H = gh + PAD * 2
+  const n = (v: number) => Math.round(v * 10) / 10
+  const out: string[] = []
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(FONT)}">`)
+  out.push(`<rect width="${W}" height="${H}" fill="#ffffff"/>`)
+  out.push(`<g transform="translate(${PAD} ${PAD})">`)
+  // 方眼の罫線（うすく）
+  const grid: string[] = []
+  for (let i = 1; i < cols; i++) grid.push(`M${i * u.uw * PX} 0V${gh}`)
+  for (let j = 1; j < rows; j++) grid.push(`M0 ${j * u.uh * PY}H${gw}`)
+  if (grid.length) out.push(`<path d="${grid.join('')}" stroke="#88878026" stroke-width="1" fill="none"/>`)
+  // 囲み: 枠と、上の辺にのせた名前
+  for (const a of sc.areas) {
+    out.push(`<rect x="${a.l * PX + 1}" y="${a.t * PY + 1}" width="${a.w * PX - 2}" height="${a.h * PY - 2}" rx="6" fill="none" stroke="${a.color}" stroke-width="1.5"/>`)
+    if (a.label) out.push(`<text x="${(a.l + 2) * PX}" y="${a.t * PY + 1}" font-size="16" fill="${a.color}" dominant-baseline="central" stroke="#ffffff" stroke-width="6" paint-order="stroke">${esc(fitPx(a.label, (a.w - 4) * PX, 16))}</text>`)
+  }
+  // 線: 細い棒と同じ位置に引く
+  for (const g of sc.segs) {
+    const d = g.dir === 'h'
+      ? `M${n((g.l + g.a) * PX)} ${n((g.t + 0.5) * PY)}H${n((g.l + g.len - g.b) * PX)}`
+      : `M${n((g.l + 0.5) * PX)} ${n((g.t + g.a) * PY)}V${n((g.t + g.len - g.b) * PY)}`
+    out.push(`<path d="${d}" stroke="${g.color}" stroke-width="2" fill="none"/>`)
+  }
+  // 矢印: 矢印のマスの真ん中から、図形の縁まで
+  const HEAD: Record<string, [number, number]> = { '▲': [0, -1], '▶': [1, 0], '▼': [0, 1], '◀': [-1, 0] }
+  for (const r of sc.runs) {
+    if (r.label) continue
+    ;[...r.text].forEach((ch, i) => {
+      const dir = HEAD[ch]
+      if (!dir) return
+      const [dx, dy] = dir, cx = (r.l + i + 0.5) * PX, cy = (r.t + 0.5) * PY
+      const tx = cx + dx * PX / 2, ty = cy + dy * PY / 2, L = 9, S = 5
+      const bx = tx - dx * L, by = ty - dy * L
+      out.push(`<path d="M${n(cx)} ${n(cy)}L${n(bx)} ${n(by)}" stroke="${r.color}" stroke-width="2"/>`)
+      out.push(`<path d="M${n(tx)} ${n(ty)}L${n(bx - dy * S)} ${n(by - dx * S)}L${n(bx + dy * S)} ${n(by + dx * S)}Z" fill="${r.color}"/>`)
+    })
+  }
+  // 遮断×
+  for (const k of sc.blocks) {
+    const cx = (k.x + 0.5) * PX, cy = (k.y + 0.5) * PY, s = 8
+    out.push(`<path d="M${n(cx - s)} ${n(cy - s)}L${n(cx + s)} ${n(cy + s)}M${n(cx + s)} ${n(cy - s)}L${n(cx - s)} ${n(cy + s)}" stroke="#e24b4a" stroke-width="3.5" stroke-linecap="round"/>`)
+  }
+  // 線のラベル
+  for (const r of sc.runs) {
+    if (!r.label) continue
+    out.push(`<text x="${n((r.l + cellWidth(r.text) / 2) * PX)}" y="${n((r.t + 0.5) * PY)}" font-size="15" fill="${r.color}" text-anchor="middle" dominant-baseline="central" stroke="#ffffff" stroke-width="5" paint-order="stroke">${esc(r.text)}</text>`)
+  }
+  // 箱と文字
+  for (const m of sc.nodes) {
+    const x = m.l * PX, y = m.t * PY, w = m.w * PX, h = m.h * PY
+    if (m.kind !== 'text') out.push(`<rect x="${x + 1}" y="${y + 1}" width="${w - 2}" height="${h - 2}" rx="5" fill="#ffffff" stroke="${m.color}" stroke-width="1.5"/>`)
+    const fill = m.kind === 'text' ? '#3d3d3a' : m.color
+    const weight = m.kind === 'text' ? '' : ' font-weight="600"'
+    if (m.label) out.push(`<text x="${n(x + w / 2)}" y="${n(y + h / 2)}" font-size="${m.kind === 'text' ? 18 : 20}"${weight} fill="${fill}" text-anchor="middle" dominant-baseline="central">${esc(fitPx(m.label, w - 12, m.kind === 'text' ? 18 : 20))}</text>`)
+  }
+  out.push('</g>', '</svg>')
+  return out.join('\n') + '\n'
 }

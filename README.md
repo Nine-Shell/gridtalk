@@ -37,6 +37,7 @@ Gridtalk draws its panel in the **Claude Code Desktop** app. In a terminal it fa
 - Select a shape or line to rename it (✎ then ✓), change its **COLOR**, or **DELETE** it. Lines also have **ARROW** (→ ↔ ―) and **BLOCK** (a large ✕ on the line).
 - ⊖ ⊕ zoom (3 steps). ◀ ▶ or dragging empty space scrolls sideways. **HELP** shows a short guide. **UNDO** steps back.
 - Tell Claude "look at the board". Claude reads it with `read_board`, and may answer by redrawing with `write_board`.
+- **EXPORT** saves the diagram as an SVG image in `gridtalk-exports/` of your project. Use it to see the diagram where the panel does not show, such as on your phone through Remote Control: ask Claude to "send me the board as an image".
 
 ## Tools for Claude
 
@@ -45,16 +46,18 @@ Gridtalk draws its panel in the **Claude Code Desktop** app. In a terminal it fa
 | `read_board` | Reads the diagram as text: shapes row by row with their grid ranges, groups and what they contain, and lines |
 | `write_board` | Redraws the whole board and shows it (the user can undo) |
 | `show_board` | Opens the panel |
+| `export_board` | Saves the diagram as an SVG image (same layout as the panel) in `gridtalk-exports/` and returns the file path |
 
 ## Storage and safety
 
 - Your diagram is saved on this computer, in Claude Code's own settings folder, **separately for each project**. It is not part of this repository, so sharing the mod never shares your diagrams. Don't put secrets on the board.
 - Text on the board reaches Claude as clearly marked **data, not instructions**. Line breaks, control characters and brackets in names are cleaned, so a name can't pose as part of the board's structure.
+- Exported images are new files each time (`board-<date>-<time>.svg`); Gridtalk never overwrites or deletes them. Names in the image are escaped, so a name can't add markup to the SVG.
 - Up to 60 shapes and 80 lines, so the panel and Claude Code stay responsive.
 
 ## Development
 
-- `hooks/model.ts` — the diagram data, the text Claude reads, line routing (no UI)
+- `hooks/model.ts` — the diagram data, the text Claude reads, line routing, the SVG image (no UI)
 - `hooks/board-surface.tsx` — draws the grid and handles dragging inside the panel
 - `hooks/register.tsx` — panel, buttons, the `/gridtalk` command, Claude's tools
 - `types/index.d.ts` — the stored data types

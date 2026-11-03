@@ -24,7 +24,7 @@ const HELP = [
   'Drag a GROUP by its border to move it with everything inside.',
   'Drag empty space, or use ◀ ▶, to scroll sideways.',
   'Ask Claude to "look at the board" to share your diagram.',
-  'EXPORT saves the diagram as an SVG image in gridtalk-exports/.',
+  'EXPORT saves the diagram as board.png and board.svg in gridtalk-exports/ (overwritten each time).',
 ]
 const selected = atom({ plugin: 'gridtalk', key: 'selected' } as const, null as Selection)
 const inherited = atom({ plugin: 'gridtalk', key: 'inherited' } as const, false)
@@ -76,16 +76,22 @@ const TOOL_WRITE = 'write_board'
 const TOOL_SHOW = 'show_board'
 const TOOL_EXPORT = 'export_board'
 
-// 図を SVG の画像にして、プロジェクトの gridtalk-exports/ に保存する（前の書き出しは消さない）
-// 返すのは保存したファイルの絶対パス。図が空なら null
-async function exportSvg($: $T): Promise<string | null> {
+// 図を画像にして、プロジェクトの gridtalk-exports/ に board.svg と board.png で保存する（毎回上書き）
+// PNG は Mac の画像の仕組み（osascript）で SVG から作る。作れないとき（Mac 以外など）は png が null
+// 図が空なら null
+type Exported = { svg: string; png: string | null }
+// PNG の倍率（SVG の1.5倍の細かさ。スマホで拡大しても文字がにじまないように）
+const PNG_SCALE = '1.5'
+async function exportBoard($: $T): Promise<Exported | null> {
   const b = await read($, board)
   if (!b.nodes.length) return null
-  const d = new Date(), p = (v: number) => String(v).padStart(2, '0')
-  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-  const path = `${(await $.session.root()).replace(/\/+$/, '')}/gridtalk-exports/board-${stamp}.svg`
-  await $.fs.write(path, toSvg(b))
-  return path
+  const dir = `${(await $.session.root()).replace(/\/+$/, '')}/gridtalk-exports`
+  const svg = `${dir}/board.svg`, png = `${dir}/board.png`
+  await $.fs.write(svg, toSvg(b))
+  // シェルを通さず、決まった引数だけで呼ぶ（図の中身はコマンドに入らない）
+  const made = await $.process.run(['osascript', '-l', 'JavaScript', `${$.plugin.root}/scripts/svg-to-png.js`, svg, png, PNG_SCALE], { timeoutMs: 20_000 })
+    .then(r => r.exitCode === 0, () => false)
+  return { svg, png: made ? png : null }
 }
 
 const BOARD_SCHEMA = {
@@ -146,7 +152,7 @@ export const register: Register = on => {
     await $.tool.register({ name: TOOL_SHOW, description: 'Open the Gridtalk panel (does not change the diagram).', isDeferred: false })
     await $.tool.register({
       name: TOOL_EXPORT,
-      description: 'Save the Gridtalk board as an SVG image (same layout as the panel) in gridtalk-exports/ of the project, and return the file path. Use it when the user wants a picture of the diagram, for example to see it on a phone where the panel does not show; then send that file to the user. To understand the diagram yourself, use read_board instead (shorter and exact).',
+      description: 'Save the Gridtalk board as images (same layout as the panel): gridtalk-exports/board.png and board.svg in the project, overwritten each time; returns both paths. Use it when the user wants a picture of the diagram, for example to see it on a phone where the panel does not show; then send the PNG to the user (the iPhone app shows an SVG as text). To understand the diagram yourself, use read_board instead (shorter and exact).',
       isDeferred: false,
     })
     // このプロジェクトで前に描いた図を引き継ぐ。壊れた保存は読まない（上書きもしない）
@@ -186,9 +192,11 @@ export const register: Register = on => {
     return { result: isPlaced ? 'Gridtalk opened.' : 'Tried to open Gridtalk, but this screen cannot show it.' }
   })().catch(failed))
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_EXPORT}` }, $ => (async () => {
-    const path = await exportSvg($)
-    if (!path) return { isError: true as const, result: 'The Gridtalk board is empty, so there is nothing to export.' }
-    return { result: `Saved the board as an SVG image: ${path}\nTo show it to the user (for example on their phone), send this file.` }
+    const out = await exportBoard($)
+    if (!out) return { isError: true as const, result: 'The Gridtalk board is empty, so there is nothing to export.' }
+    return { result: out.png
+      ? `Saved the board as images (each export overwrites the last):\nPNG: ${out.png}\nSVG: ${out.svg}\nTo show it to the user, send the PNG (the iPhone app shows an SVG as text, not as a picture).`
+      : `Saved the board as an SVG image: ${out.svg}\nA PNG could not be made on this computer (it needs macOS), so send the SVG.` }
   })().catch(failed))
   on('tool.call', { tool: `mcp__gridtalk__${TOOL_WRITE}` }, ($, e) => (async () => {
     const input = e as unknown as { nodes?: unknown; edges?: unknown }
@@ -337,8 +345,8 @@ export const register: Register = on => {
             <Button key="pan-left" label="◀" dimColor={curOx === 0} onPress={panBy(-1)} />
             <Button key="pan-right" label="▶" dimColor={curOx >= maxOx} onPress={panBy(1)} />
             <Button key="export" label="EXPORT" dimColor={!b.nodes.length} onPress={async () => {
-              const path = await exportSvg($).catch(() => undefined)
-              $.ui.toast(path ? `Saved ${path.split('/').slice(-2).join('/')}` : path === null ? 'Nothing to export yet' : 'Could not save the image')
+              const out = await exportBoard($).catch(() => undefined)
+              $.ui.toast(out ? `Saved gridtalk-exports/${out.png ? 'board.png and board.svg' : 'board.svg'}` : out === null ? 'Nothing to export yet' : 'Could not save the image')
             }} />
             <Button key="help" label="HELP" variant={showHelp ? 'primary' : undefined} onPress={() => update($, help, v => !v)} />
           </Box>

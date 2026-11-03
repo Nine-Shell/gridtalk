@@ -1,6 +1,6 @@
 {
   "name": "gridtalk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A grid board beside the chat for talking with Claude in boxes, groups and lines. Claude reads your diagram as compact text and can redraw it.",
   "author": { "name": "Nine-Shell" },
   "license": "MIT",

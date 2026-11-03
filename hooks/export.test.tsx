@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 import { toSvg } from './model'
 
@@ -51,12 +52,12 @@ test('ラベルの記号は XML としてエスケープされ、タグになら
   expect(odd).toContain('>AB😀</text>')
 })
 
-test('EXPORT と export_board で、プロジェクトの gridtalk-exports/ に SVG を保存する', async ($, on) => {
-  const files: Record<string, string> = {}
+// 書き出しのテストで使う、まわりの仕組みの代わり。png: PNG の変換が成功するか
+function stubs(on: Parameters<TestBody>[1], png: boolean) {
+  const files: Record<string, string> = {}, runs: string[][] = [], toasts: string[] = []
   on('command.register', () => ({ value: { command: 'gridtalk' } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__gridtalk__${e.name}` } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  const toasts: string[] = []
   on('ui.toast', (_, e) => { toasts.push((e as unknown as { text: string }).text); return { value: undefined } })
   on('store.keys', () => ({ value: [] }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -64,24 +65,56 @@ test('EXPORT と export_board で、プロジェクトの gridtalk-exports/ に 
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('fs.write', (_, e) => { const w = e as unknown as { path: string; text: string }; files[w.path] = w.text; return { value: undefined } })
+  on('process.run', (_, e) => {
+    runs.push([...(e as unknown as { argv: string[] }).argv])
+    return { value: { exitCode: png ? 0 : 1, stdout: '', stderr: png ? '' : 'osascript: not found' } } as never
+  })
+  return { files, runs, toasts }
+}
+
+test('EXPORT と export_board で、gridtalk-exports/ に board.svg と board.png を上書きで保存する', async ($, on) => {
+  const { files, runs, toasts } = stubs(on, true)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
   // 空の図は書き出さない
   const empty = await $.tool.call({ tool: 'mcp__gridtalk__export_board' } as never)
   expect(JSON.stringify(empty)).toContain('empty')
   expect(Object.keys(files).length).toBe(0)
+  expect(runs.length).toBe(0)
 
   await $.tool.call({ tool: 'mcp__gridtalk__write_board', ...SAMPLE } as never)
   const r = JSON.stringify(await $.tool.call({ tool: 'mcp__gridtalk__export_board' } as never))
-  const path = Object.keys(files)[0]!
-  expect(path).toMatch(/^\/proj\/gridtalk-exports\/board-\d{8}-\d{6}\.svg$/)
-  expect(r).toContain(path)
-  expect(files[path]).toContain('>攻撃者</text>')
+  expect(Object.keys(files)).toEqual(['/proj/gridtalk-exports/board.svg'])
+  expect(files['/proj/gridtalk-exports/board.svg']).toContain('>攻撃者</text>')
+  // PNG は、決まった引数だけで Mac の変換を呼んで作る（シェルを通さない）
+  expect(runs.length).toBe(1)
+  const argv = runs[0]!
+  expect(argv.slice(0, 3)).toEqual(['osascript', '-l', 'JavaScript'])
+  expect(argv[3]!.endsWith('/scripts/svg-to-png.js')).toBe(true)
+  expect(argv.slice(4)).toEqual(['/proj/gridtalk-exports/board.svg', '/proj/gridtalk-exports/board.png', '1.5'])
+  expect(r).toContain('PNG: /proj/gridtalk-exports/board.png')
+  expect(r).toContain('SVG: /proj/gridtalk-exports/board.svg')
+  expect(r).toContain('send the PNG')
 
-  // パネルの EXPORT ボタンでも保存され、短いお知らせが出る
+  // パネルの EXPORT ボタンでも同じ名前に上書きし、短いお知らせが出る
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'export' } as never)
-  expect(Object.keys(files).length).toBeGreaterThan(0)
-  expect(toasts.some(t => t.startsWith('Saved gridtalk-exports/board-'))).toBe(true)
+  expect(Object.keys(files)).toEqual(['/proj/gridtalk-exports/board.svg'])
+  expect(runs.length).toBe(2)
+  expect(toasts).toContain('Saved gridtalk-exports/board.png and board.svg')
+  await ui.unmount()
+})
+
+test('PNG が作れないとき（Mac 以外など）は、SVG だけ保存してそう伝える', async ($, on) => {
+  const { files, toasts } = stubs(on, false)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.tool.call({ tool: 'mcp__gridtalk__write_board', ...SAMPLE } as never)
+  const r = JSON.stringify(await $.tool.call({ tool: 'mcp__gridtalk__export_board' } as never))
+  expect(Object.keys(files)).toEqual(['/proj/gridtalk-exports/board.svg'])
+  expect(r).toContain('could not be made')
+  expect(r).not.toContain('PNG: ')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'export' } as never)
+  expect(toasts).toContain('Saved gridtalk-exports/board.svg')
   await ui.unmount()
 })

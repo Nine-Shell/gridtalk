@@ -447,6 +447,15 @@ const XML: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"
 const esc = (s: string) => s.replace(/[\p{Cs}\uFFFE\uFFFF]/gu, '').replace(/[&<>"']/g, c => XML[c] ?? c)
 // 文字の幅の見積もり（全角は字の大きさぶん、半角はその6割）
 const textPx = (s: string, size: number) => [...s].reduce((w, ch) => w + (cellWidth(ch) === 2 ? size : size * 0.6), 0)
+// 文字を置く。y は文字の縦の真ん中。halo: 線の上でも読めるよう、白いふちを下に敷く
+// （dominant-baseline・paint-order・8桁の色は、Mac の画像変換が描けないので使わない）
+function textEl(x: number, y: number, text: string, size: number, fill: string, o: { anchor?: 'middle'; halo?: number; bold?: boolean } = {}): string {
+  const r = (v: number) => Math.round(v * 10) / 10
+  const at = `x="${r(x)}" y="${r(y + size * 0.36)}" font-size="${size}"${o.anchor ? ` text-anchor="${o.anchor}"` : ''}${o.bold ? ' font-weight="bold"' : ''}`
+  const body = esc(text)
+  const halo = o.halo ? `<text ${at} fill="#ffffff" stroke="#ffffff" stroke-width="${o.halo}" stroke-linejoin="round">${body}</text>` : ''
+  return `${halo}<text ${at} fill="${fill}">${body}</text>`
+}
 function fitPx(s: string, max: number, size: number): string {
   if (textPx(s, size) <= max) return s
   let out = ''
@@ -476,11 +485,11 @@ export function toSvg(input: Board, u: Unit = ZOOMS[1]!): string {
   const grid: string[] = []
   for (let i = 1; i < cols; i++) grid.push(`M${i * u.uw * PX} 0V${gh}`)
   for (let j = 1; j < rows; j++) grid.push(`M0 ${j * u.uh * PY}H${gw}`)
-  if (grid.length) out.push(`<path d="${grid.join('')}" stroke="#88878026" stroke-width="1" fill="none"/>`)
+  if (grid.length) out.push(`<path d="${grid.join('')}" stroke="#888780" stroke-opacity="0.15" stroke-width="1" fill="none"/>`)
   // 囲み: 枠と、上の辺にのせた名前
   for (const a of sc.areas) {
     out.push(`<rect x="${a.l * PX + 1}" y="${a.t * PY + 1}" width="${a.w * PX - 2}" height="${a.h * PY - 2}" rx="6" fill="none" stroke="${a.color}" stroke-width="1.5"/>`)
-    if (a.label) out.push(`<text x="${(a.l + 2) * PX}" y="${a.t * PY + 1}" font-size="16" fill="${a.color}" dominant-baseline="central" stroke="#ffffff" stroke-width="6" paint-order="stroke">${esc(fitPx(a.label, (a.w - 4) * PX, 16))}</text>`)
+    if (a.label) out.push(textEl((a.l + 2) * PX, a.t * PY + 1, fitPx(a.label, (a.w - 4) * PX, 16), 16, a.color, { halo: 6 }))
   }
   // 線: 細い棒と同じ位置に引く
   for (const g of sc.segs) {
@@ -511,15 +520,14 @@ export function toSvg(input: Board, u: Unit = ZOOMS[1]!): string {
   // 線のラベル
   for (const r of sc.runs) {
     if (!r.label) continue
-    out.push(`<text x="${n((r.l + cellWidth(r.text) / 2) * PX)}" y="${n((r.t + 0.5) * PY)}" font-size="15" fill="${r.color}" text-anchor="middle" dominant-baseline="central" stroke="#ffffff" stroke-width="5" paint-order="stroke">${esc(r.text)}</text>`)
+    out.push(textEl((r.l + cellWidth(r.text) / 2) * PX, (r.t + 0.5) * PY, r.text, 15, r.color, { anchor: 'middle', halo: 5 }))
   }
   // 箱と文字
   for (const m of sc.nodes) {
     const x = m.l * PX, y = m.t * PY, w = m.w * PX, h = m.h * PY
     if (m.kind !== 'text') out.push(`<rect x="${x + 1}" y="${y + 1}" width="${w - 2}" height="${h - 2}" rx="5" fill="#ffffff" stroke="${m.color}" stroke-width="1.5"/>`)
-    const fill = m.kind === 'text' ? '#3d3d3a' : m.color
-    const weight = m.kind === 'text' ? '' : ' font-weight="600"'
-    if (m.label) out.push(`<text x="${n(x + w / 2)}" y="${n(y + h / 2)}" font-size="${m.kind === 'text' ? 18 : 20}"${weight} fill="${fill}" text-anchor="middle" dominant-baseline="central">${esc(fitPx(m.label, w - 12, m.kind === 'text' ? 18 : 20))}</text>`)
+    const isText = m.kind === 'text', size = isText ? 18 : 20
+    if (m.label) out.push(textEl(x + w / 2, y + h / 2, fitPx(m.label, w - 12, size), size, isText ? '#3d3d3a' : m.color, { anchor: 'middle', bold: !isText }))
   }
   out.push('</g>', '</svg>')
   return out.join('\n') + '\n'
